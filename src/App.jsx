@@ -3,18 +3,24 @@ import { getCoinMarketData, searchCoins } from './lib/api/coingecko'
 import { createRateLimiter } from './lib/rateLimit'
 import './App.css'
 
+const MAX_SELECTED = 3
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 function App() {
   const [query, setQuery] = useState('')
   const [searchStatus, setSearchStatus] = useState('idle')
   const [searchResults, setSearchResults] = useState([])
   const [searchFromCache, setSearchFromCache] = useState(false)
-  const [selectedId, setSelectedId] = useState('')
+  const [selectedIds, setSelectedIds] = useState([])
   const [detailStatus, setDetailStatus] = useState('idle')
-  const [detailData, setDetailData] = useState(null)
-  const [detailFromCache, setDetailFromCache] = useState(false)
+  const [detailData, setDetailData] = useState({})
+  const [detailFromCache, setDetailFromCache] = useState({})
 
   const searchLimiter = useMemo(
-    () => createRateLimiter({ intervalMs: 1000, maxCalls: 1 }),
+    () => createRateLimiter({ intervalMs: 1000, maxCalls: 2 }),
     []
   )
   const detailLimiter = useMemo(
@@ -34,6 +40,7 @@ function App() {
     const timeoutId = setTimeout(async () => {
       if (!searchLimiter()) {
         setSearchStatus('rate_limited')
+        setTimeout(() => setSearchStatus('idle'), 1000)
         return
       }
       try {
@@ -45,6 +52,7 @@ function App() {
       } catch (error) {
         if (error?.message === 'rate_limited') {
           setSearchStatus('rate_limited')
+          setTimeout(() => setSearchStatus('idle'), 1000)
         } else {
           setSearchStatus('error')
         }
@@ -54,26 +62,50 @@ function App() {
     return () => clearTimeout(timeoutId)
   }, [query, searchLimiter])
 
-  async function handleSelect(coinId) {
-    if (!coinId) return
+  async function fetchCoinDetails(coinId) {
     if (!detailLimiter()) {
       setDetailStatus('rate_limited')
+      setTimeout(() => setDetailStatus('idle'), 1000)
       return
     }
-    setSelectedId(coinId)
     setDetailStatus('loading')
     try {
       const { data, fromCache } = await getCoinMarketData(coinId)
-      setDetailData(data)
-      setDetailFromCache(fromCache)
+      setDetailData((prev) => ({ ...prev, [coinId]: data }))
+      setDetailFromCache((prev) => ({ ...prev, [coinId]: fromCache }))
       setDetailStatus('idle')
     } catch (error) {
       if (error?.message === 'rate_limited') {
         setDetailStatus('rate_limited')
+        setTimeout(() => setDetailStatus('idle'), 1000)
       } else {
         setDetailStatus('error')
       }
     }
+  }
+
+  async function handleSelect(coinId) {
+    if (!coinId) return
+    if (selectedIds.includes(coinId)) return
+    if (selectedIds.length >= MAX_SELECTED) return
+    setSelectedIds((prev) => [...prev, coinId])
+    await fetchCoinDetails(coinId)
+  }
+
+  function handleRemove(coinId) {
+    setSelectedIds((prev) => prev.filter((id) => id !== coinId))
+  }
+
+  async function handleReport() {
+    if (selectedIds.length === 0) return
+    setDetailStatus('loading')
+    for (const coinId of selectedIds) {
+      if (!detailData[coinId]) {
+        await fetchCoinDetails(coinId)
+        await sleep(250)
+      }
+    }
+    setDetailStatus('idle')
   }
 
   return (
@@ -86,7 +118,13 @@ function App() {
             <p className="subtitle">Analyse long terme, claire et neutre.</p>
           </div>
         </div>
-        <button className="cta">Lancer un rapport</button>
+        <button
+          className="cta"
+          onClick={handleReport}
+          disabled={selectedIds.length === 0}
+        >
+          Lancer un rapport
+        </button>
       </header>
 
       <main className="main">
@@ -105,9 +143,25 @@ function App() {
               {searchStatus === 'loading' && 'Recherche...'}
               {searchStatus === 'rate_limited' && 'Limite atteinte, pause'}
               {searchStatus === 'error' && 'Erreur de recherche'}
-              {searchFromCache && searchResults.length > 0 && 'Donnees en cache'}
+              {searchStatus === 'idle' &&
+                searchFromCache &&
+                searchResults.length > 0 &&
+                'Donnees en cache'}
             </div>
           </div>
+          {selectedIds.length > 0 && (
+            <div className="selected-list">
+              {selectedIds.map((id) => (
+                <button
+                  key={id}
+                  className="selected-pill"
+                  onClick={() => handleRemove(id)}
+                >
+                  {id} ✕
+                </button>
+              ))}
+            </div>
+          )}
           {searchResults.length > 0 && (
             <ul className="search-results">
               {searchResults.map((coin) => (
@@ -115,6 +169,10 @@ function App() {
                   <button
                     className="search-result"
                     onClick={() => handleSelect(coin.id)}
+                    disabled={
+                      selectedIds.includes(coin.id) ||
+                      selectedIds.length >= MAX_SELECTED
+                    }
                   >
                     <span>{coin.name}</span>
                     <span className="muted">{coin.symbol?.toUpperCase()}</span>
@@ -123,33 +181,39 @@ function App() {
               ))}
             </ul>
           )}
-          {selectedId && (
+          {selectedIds.length > 0 && (
             <div className="detail-status">
               {detailStatus === 'loading' && 'Chargement des donnees...'}
               {detailStatus === 'rate_limited' && 'Limite atteinte, pause'}
               {detailStatus === 'error' && 'Erreur de recuperation'}
-              {detailFromCache && detailData && 'Donnees en cache'}
+              {detailStatus === 'idle' &&
+                selectedIds.some((id) => detailFromCache[id]) &&
+                'Donnees en cache'}
             </div>
           )}
-          {detailData && (
-            <div className="detail-card">
-              <h3>{detailData.name}</h3>
-              <div className="detail-grid">
-                <div>
-                  <span className="muted">Prix USD</span>
-                  <div>${detailData.market_data?.current_price?.usd}</div>
-                </div>
-                <div>
-                  <span className="muted">Market cap</span>
-                  <div>${detailData.market_data?.market_cap?.usd}</div>
-                </div>
-                <div>
-                  <span className="muted">Volume 24h</span>
-                  <div>${detailData.market_data?.total_volume?.usd}</div>
+          {selectedIds.map((id) => {
+            const data = detailData[id]
+            if (!data) return null
+            return (
+              <div key={id} className="detail-card">
+                <h3>{data.name}</h3>
+                <div className="detail-grid">
+                  <div>
+                    <span className="muted">Prix USD</span>
+                    <div>${data.market_data?.current_price?.usd}</div>
+                  </div>
+                  <div>
+                    <span className="muted">Market cap</span>
+                    <div>${data.market_data?.market_cap?.usd}</div>
+                  </div>
+                  <div>
+                    <span className="muted">Volume 24h</span>
+                    <div>${data.market_data?.total_volume?.usd}</div>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )
+          })}
         </section>
 
         <section className="grid">
