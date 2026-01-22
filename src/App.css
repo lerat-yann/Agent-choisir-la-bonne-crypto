@@ -50,7 +50,7 @@
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: 1fr;
   gap: 1rem;
 }
 
@@ -147,10 +147,34 @@
   gap: 0.5rem;
 }
 
+.chart-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+}
+
 .mini-row {
   display: grid;
   gap: 0.25rem;
   font-size: 0.9rem;
+}
+
+.market-grid {
+  gap: 0.35rem;
+}
+
+.market-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr 1fr;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.market-row.header {
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
 }
 
 .compare-table {
@@ -221,6 +245,14 @@
   .header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .chart-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .market-row {
+    grid-template-columns: 1fr;
   }
 
   .compare-row {

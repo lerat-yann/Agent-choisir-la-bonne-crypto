@@ -294,21 +294,21 @@ function App() {
               <p>Prix, capitalisation, volume, historique.</p>
             )}
             {selectedIds.length > 0 && (
-              <div className="panel-stack">
+              <div className="panel-stack market-grid">
+                <div className="market-row header">
+                  <span>Actif</span>
+                  <span>Prix</span>
+                  <span>Cap</span>
+                  <span>Vol 24h</span>
+                </div>
                 {selectedIds.map((id) => {
                   const data = detailData[id]
                   return (
-                    <div key={id} className="mini-row">
+                    <div key={id} className="market-row">
                       <strong>{data?.name || id}</strong>
-                      <span>
-                        Prix: {formatUsd(data?.market_data?.current_price?.usd)}
-                      </span>
-                      <span>
-                        Cap: {formatUsd(data?.market_data?.market_cap?.usd)}
-                      </span>
-                      <span>
-                        Vol 24h: {formatUsd(data?.market_data?.total_volume?.usd)}
-                      </span>
+                      <span>{formatUsd(data?.market_data?.current_price?.usd)}</span>
+                      <span>{formatUsd(data?.market_data?.market_cap?.usd)}</span>
+                      <span>{formatUsd(data?.market_data?.total_volume?.usd)}</span>
                     </div>
                   )
                 })}
@@ -332,7 +332,7 @@ function App() {
               <p>Tendance, drawdown, volatilite relative.</p>
             )}
             {selectedIds.length > 0 && (
-              <div className="panel-stack">
+              <div className="panel-stack chart-grid">
                 {selectedIds.map((id) => {
                   const data = chartData[id]
                   const prices = data?.prices || []
