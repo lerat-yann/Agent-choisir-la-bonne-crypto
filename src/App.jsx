@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getCoinMarketData, searchCoins } from './lib/api/coingecko'
 import { createRateLimiter } from './lib/rateLimit'
+import PriceChart from './components/PriceChart'
 import './App.css'
 
 const MAX_SELECTED = 3
@@ -41,7 +42,7 @@ function App() {
     []
   )
   const chartLimiter = useMemo(
-    () => createRateLimiter({ intervalMs: 1000, maxCalls: 1 }),
+    () => createRateLimiter({ intervalMs: 1500, maxCalls: 1 }),
     []
   )
 
@@ -144,11 +145,11 @@ function App() {
     for (const coinId of selectedIds) {
       if (!detailData[coinId]) {
         await fetchCoinDetails(coinId)
-        await sleep(250)
+        await sleep(500)
       }
       if (!chartData[coinId]) {
         await fetchMarketChart(coinId)
-        await sleep(250)
+        await sleep(800)
       }
     }
     setDetailStatus('idle')
@@ -311,13 +312,18 @@ function App() {
                   const data = chartData[id]
                   const prices = data?.prices || []
                   if (prices.length < 2) return null
-                  const first = prices[0][1]
-                  const last = prices[prices.length - 1][1]
-                  const change = first ? ((last - first) / first) * 100 : 0
                   return (
-                    <div key={id} className="mini-row">
-                      <strong>{detailData[id]?.name || id}</strong>
-                      <span>Tendance 365j: {change.toFixed(2)}%</span>
+                    <div key={id} className="chart-card">
+                      <div className="chart-header">
+                        <strong>{detailData[id]?.name || id}</strong>
+                        <span className="muted">Evolution 365j</span>
+                      </div>
+                      <div className="chart-wrapper">
+                        <PriceChart
+                          prices={prices}
+                          label={detailData[id]?.symbol || id}
+                        />
+                      </div>
                     </div>
                   )
                 })}

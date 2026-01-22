@@ -1,7 +1,7 @@
 import { fetchJson } from './fetchJson'
 import { getCached, setCached } from '../cache'
 
-const BASE_URL = 'https://api.coingecko.com/api/v3'
+const BASE_URL = '/api/coingecko'
 const DEFAULT_TTL_MS = 15 * 60 * 1000
 
 function cacheKey(path, params) {
@@ -18,7 +18,7 @@ async function fetchWithCache(path, params, ttlMs = DEFAULT_TTL_MS, options = {}
     return cached
   }
 
-  const url = new URL(`${BASE_URL}${path}`)
+  const url = new URL(`${BASE_URL}${path}`, window.location.origin)
   if (params) {
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v))
   }
