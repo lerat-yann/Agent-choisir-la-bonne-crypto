@@ -28,8 +28,10 @@ function App() {
   const [detailStatus, setDetailStatus] = useState('idle')
   const [detailData, setDetailData] = useState({})
   const [detailFromCache, setDetailFromCache] = useState({})
+  const [detailStatusById, setDetailStatusById] = useState({})
   const [chartStatus, setChartStatus] = useState('idle')
   const [chartData, setChartData] = useState({})
+  const [chartStatusById, setChartStatusById] = useState({})
   const [reportStatus, setReportStatus] = useState('idle')
   const reportRef = useRef(null)
 
@@ -83,21 +85,26 @@ function App() {
   async function fetchCoinDetails(coinId) {
     if (!detailLimiter()) {
       setDetailStatus('rate_limited')
+      setDetailStatusById((prev) => ({ ...prev, [coinId]: 'rate_limited' }))
       setTimeout(() => setDetailStatus('idle'), 1000)
       return
     }
     setDetailStatus('loading')
+    setDetailStatusById((prev) => ({ ...prev, [coinId]: 'loading' }))
     try {
       const { data, fromCache } = await getCoinMarketData(coinId)
       setDetailData((prev) => ({ ...prev, [coinId]: data }))
       setDetailFromCache((prev) => ({ ...prev, [coinId]: fromCache }))
       setDetailStatus('idle')
+      setDetailStatusById((prev) => ({ ...prev, [coinId]: 'idle' }))
     } catch (error) {
       if (error?.message === 'rate_limited') {
         setDetailStatus('rate_limited')
+        setDetailStatusById((prev) => ({ ...prev, [coinId]: 'rate_limited' }))
         setTimeout(() => setDetailStatus('idle'), 1000)
       } else {
         setDetailStatus('error')
+        setDetailStatusById((prev) => ({ ...prev, [coinId]: 'error' }))
       }
     }
   }
@@ -105,21 +112,26 @@ function App() {
   async function fetchMarketChart(coinId) {
     if (!chartLimiter()) {
       setChartStatus('rate_limited')
+      setChartStatusById((prev) => ({ ...prev, [coinId]: 'rate_limited' }))
       setTimeout(() => setChartStatus('idle'), 1000)
       return
     }
     setChartStatus('loading')
+    setChartStatusById((prev) => ({ ...prev, [coinId]: 'loading' }))
     try {
       const { getMarketChart } = await import('./lib/api/coingecko')
       const data = await getMarketChart(coinId, 365)
       setChartData((prev) => ({ ...prev, [coinId]: data }))
       setChartStatus('idle')
+      setChartStatusById((prev) => ({ ...prev, [coinId]: 'idle' }))
     } catch (error) {
       if (error?.message === 'rate_limited') {
         setChartStatus('rate_limited')
+        setChartStatusById((prev) => ({ ...prev, [coinId]: 'rate_limited' }))
         setTimeout(() => setChartStatus('idle'), 1000)
       } else {
         setChartStatus('error')
+        setChartStatusById((prev) => ({ ...prev, [coinId]: 'error' }))
       }
     }
   }
@@ -244,24 +256,32 @@ function App() {
           )}
           {selectedIds.map((id) => {
             const data = detailData[id]
-            if (!data) return null
+            const status = detailStatusById[id]
             return (
               <div key={id} className="detail-card">
-                <h3>{data.name}</h3>
-                <div className="detail-grid">
-                  <div>
-                    <span className="muted">Prix USD</span>
-                    <div>${data.market_data?.current_price?.usd}</div>
+                <h3>{data?.name || id}</h3>
+                {data ? (
+                  <div className="detail-grid">
+                    <div>
+                      <span className="muted">Prix USD</span>
+                      <div>{formatUsd(data.market_data?.current_price?.usd)}</div>
+                    </div>
+                    <div>
+                      <span className="muted">Market cap</span>
+                      <div>{formatUsd(data.market_data?.market_cap?.usd)}</div>
+                    </div>
+                    <div>
+                      <span className="muted">Volume 24h</span>
+                      <div>{formatUsd(data.market_data?.total_volume?.usd)}</div>
+                    </div>
                   </div>
-                  <div>
-                    <span className="muted">Market cap</span>
-                    <div>${data.market_data?.market_cap?.usd}</div>
-                  </div>
-                  <div>
-                    <span className="muted">Volume 24h</span>
-                    <div>${data.market_data?.total_volume?.usd}</div>
-                  </div>
-                </div>
+                ) : (
+                  <p className="muted">
+                    {status === 'error' && 'Erreur de recuperation'}
+                    {status === 'rate_limited' && 'Limite atteinte, pause'}
+                    {!status && 'Chargement des donnees...'}
+                  </p>
+                )}
               </div>
             )
           })}
@@ -277,13 +297,18 @@ function App() {
               <div className="panel-stack">
                 {selectedIds.map((id) => {
                   const data = detailData[id]
-                  if (!data) return null
                   return (
                     <div key={id} className="mini-row">
-                      <strong>{data.name}</strong>
-                      <span>Prix: {formatUsd(data.market_data?.current_price?.usd)}</span>
-                      <span>Cap: {formatUsd(data.market_data?.market_cap?.usd)}</span>
-                      <span>Vol 24h: {formatUsd(data.market_data?.total_volume?.usd)}</span>
+                      <strong>{data?.name || id}</strong>
+                      <span>
+                        Prix: {formatUsd(data?.market_data?.current_price?.usd)}
+                      </span>
+                      <span>
+                        Cap: {formatUsd(data?.market_data?.market_cap?.usd)}
+                      </span>
+                      <span>
+                        Vol 24h: {formatUsd(data?.market_data?.total_volume?.usd)}
+                      </span>
                     </div>
                   )
                 })}
@@ -311,7 +336,7 @@ function App() {
                 {selectedIds.map((id) => {
                   const data = chartData[id]
                   const prices = data?.prices || []
-                  if (prices.length < 2) return null
+                  const status = chartStatusById[id]
                   return (
                     <div key={id} className="chart-card">
                       <div className="chart-header">
@@ -319,10 +344,18 @@ function App() {
                         <span className="muted">Evolution 365j</span>
                       </div>
                       <div className="chart-wrapper">
-                        <PriceChart
-                          prices={prices}
-                          label={detailData[id]?.symbol || id}
-                        />
+                        {prices.length >= 2 ? (
+                          <PriceChart
+                            prices={prices}
+                            label={detailData[id]?.symbol || id}
+                          />
+                        ) : (
+                          <p className="muted">
+                            {status === 'error' && 'Erreur de recuperation'}
+                            {status === 'rate_limited' && 'Limite atteinte, pause'}
+                            {!status && 'Chargement des tendances...'}
+                          </p>
+                        )}
                       </div>
                     </div>
                   )
@@ -345,13 +378,16 @@ function App() {
                 </div>
                 {selectedIds.map((id) => {
                   const data = detailData[id]
-                  if (!data) return null
                   return (
                     <div key={id} className="compare-row">
-                      <span>{data.name}</span>
-                      <span>{formatUsd(data.market_data?.current_price?.usd)}</span>
-                      <span>{formatUsd(data.market_data?.market_cap?.usd)}</span>
-                      <span>{formatUsd(data.market_data?.total_volume?.usd)}</span>
+                      <span>{data?.name || id}</span>
+                      <span>
+                        {formatUsd(data?.market_data?.current_price?.usd)}
+                      </span>
+                      <span>{formatUsd(data?.market_data?.market_cap?.usd)}</span>
+                      <span>
+                        {formatUsd(data?.market_data?.total_volume?.usd)}
+                      </span>
                     </div>
                   )
                 })}
