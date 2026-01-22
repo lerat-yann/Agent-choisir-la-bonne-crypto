@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { getCoinMarketData, searchCoins } from './lib/api/coingecko'
 import { createRateLimiter } from './lib/rateLimit'
 import './App.css'
@@ -7,6 +7,15 @@ const MAX_SELECTED = 3
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function formatUsd(value) {
+  if (value === null || value === undefined) return '-'
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0
+  }).format(value)
 }
 
 function App() {
@@ -18,12 +27,20 @@ function App() {
   const [detailStatus, setDetailStatus] = useState('idle')
   const [detailData, setDetailData] = useState({})
   const [detailFromCache, setDetailFromCache] = useState({})
+  const [chartStatus, setChartStatus] = useState('idle')
+  const [chartData, setChartData] = useState({})
+  const [reportStatus, setReportStatus] = useState('idle')
+  const reportRef = useRef(null)
 
   const searchLimiter = useMemo(
     () => createRateLimiter({ intervalMs: 1000, maxCalls: 2 }),
     []
   )
   const detailLimiter = useMemo(
+    () => createRateLimiter({ intervalMs: 1000, maxCalls: 1 }),
+    []
+  )
+  const chartLimiter = useMemo(
     () => createRateLimiter({ intervalMs: 1000, maxCalls: 1 }),
     []
   )
@@ -84,12 +101,35 @@ function App() {
     }
   }
 
+  async function fetchMarketChart(coinId) {
+    if (!chartLimiter()) {
+      setChartStatus('rate_limited')
+      setTimeout(() => setChartStatus('idle'), 1000)
+      return
+    }
+    setChartStatus('loading')
+    try {
+      const { getMarketChart } = await import('./lib/api/coingecko')
+      const data = await getMarketChart(coinId, 365)
+      setChartData((prev) => ({ ...prev, [coinId]: data }))
+      setChartStatus('idle')
+    } catch (error) {
+      if (error?.message === 'rate_limited') {
+        setChartStatus('rate_limited')
+        setTimeout(() => setChartStatus('idle'), 1000)
+      } else {
+        setChartStatus('error')
+      }
+    }
+  }
+
   async function handleSelect(coinId) {
     if (!coinId) return
     if (selectedIds.includes(coinId)) return
     if (selectedIds.length >= MAX_SELECTED) return
     setSelectedIds((prev) => [...prev, coinId])
     await fetchCoinDetails(coinId)
+    await fetchMarketChart(coinId)
   }
 
   function handleRemove(coinId) {
@@ -98,21 +138,31 @@ function App() {
 
   async function handleReport() {
     if (selectedIds.length === 0) return
+    setReportStatus('loading')
     setDetailStatus('loading')
+    setChartStatus('loading')
     for (const coinId of selectedIds) {
       if (!detailData[coinId]) {
         await fetchCoinDetails(coinId)
         await sleep(250)
       }
+      if (!chartData[coinId]) {
+        await fetchMarketChart(coinId)
+        await sleep(250)
+      }
     }
     setDetailStatus('idle')
+    setChartStatus('idle')
+    setReportStatus('done')
+    setTimeout(() => setReportStatus('idle'), 2000)
+    reportRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
   return (
     <div className="page">
       <header className="header">
         <div className="brand">
-          <span className="brand-mark">◉</span>
+          <span className="brand-mark" aria-hidden="true" />
           <div>
             <h1>Choisir la bonne crypto</h1>
             <p className="subtitle">Analyse long terme, claire et neutre.</p>
@@ -123,7 +173,7 @@ function App() {
           onClick={handleReport}
           disabled={selectedIds.length === 0}
         >
-          Lancer un rapport
+          {reportStatus === 'loading' ? 'Preparation...' : 'Lancer un rapport'}
         </button>
       </header>
 
@@ -216,28 +266,122 @@ function App() {
           })}
         </section>
 
-        <section className="grid">
+        <section className="grid" ref={reportRef}>
           <div className="panel">
             <h3>Donnees marche (CoinGecko)</h3>
-            <p>Prix, capitalisation, volume, historique.</p>
+            {selectedIds.length === 0 && (
+              <p>Prix, capitalisation, volume, historique.</p>
+            )}
+            {selectedIds.length > 0 && (
+              <div className="panel-stack">
+                {selectedIds.map((id) => {
+                  const data = detailData[id]
+                  if (!data) return null
+                  return (
+                    <div key={id} className="mini-row">
+                      <strong>{data.name}</strong>
+                      <span>Prix: {formatUsd(data.market_data?.current_price?.usd)}</span>
+                      <span>Cap: {formatUsd(data.market_data?.market_cap?.usd)}</span>
+                      <span>Vol 24h: {formatUsd(data.market_data?.total_volume?.usd)}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
           <div className="panel">
             <h3>Fondamentaux & risques</h3>
-            <p>Explication neutre, pas de conseil financier.</p>
+            <ul className="bullet-list">
+              <li>Utilite reelle et adoption</li>
+              <li>Securite du reseau et decentralisation</li>
+              <li>Risques: volatilite, technique, reglementation</li>
+            </ul>
           </div>
           <div className="panel">
             <h3>Graphiques long terme</h3>
-            <p>Tendance, drawdown, volatilite relative.</p>
+            {chartStatus === 'loading' && <p>Chargement des tendances...</p>}
+            {chartStatus === 'rate_limited' && <p>Limite atteinte, pause</p>}
+            {chartStatus === 'error' && <p>Erreur de recuperation</p>}
+            {selectedIds.length === 0 && (
+              <p>Tendance, drawdown, volatilite relative.</p>
+            )}
+            {selectedIds.length > 0 && (
+              <div className="panel-stack">
+                {selectedIds.map((id) => {
+                  const data = chartData[id]
+                  const prices = data?.prices || []
+                  if (prices.length < 2) return null
+                  const first = prices[0][1]
+                  const last = prices[prices.length - 1][1]
+                  const change = first ? ((last - first) / first) * 100 : 0
+                  return (
+                    <div key={id} className="mini-row">
+                      <strong>{detailData[id]?.name || id}</strong>
+                      <span>Tendance 365j: {change.toFixed(2)}%</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
           <div className="panel">
             <h3>Comparaison multi-crypto</h3>
-            <p>Tableau clair des differences principales.</p>
+            {selectedIds.length < 2 && (
+              <p>Selectionne 2-3 actifs pour comparer.</p>
+            )}
+            {selectedIds.length >= 2 && (
+              <div className="compare-table">
+                <div className="compare-row header">
+                  <span>Actif</span>
+                  <span>Prix</span>
+                  <span>Cap</span>
+                  <span>Vol 24h</span>
+                </div>
+                {selectedIds.map((id) => {
+                  const data = detailData[id]
+                  if (!data) return null
+                  return (
+                    <div key={id} className="compare-row">
+                      <span>{data.name}</span>
+                      <span>{formatUsd(data.market_data?.current_price?.usd)}</span>
+                      <span>{formatUsd(data.market_data?.market_cap?.usd)}</span>
+                      <span>{formatUsd(data.market_data?.total_volume?.usd)}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </section>
 
         <section className="panel">
           <h2>Mode debutant</h2>
-          <p>Definitions simples, 3 erreurs frequentes, checklist securite.</p>
+          <div className="beginner-grid">
+            <div>
+              <h4>Definitions simples</h4>
+              <ul className="bullet-list">
+                <li>Capitalisation: valeur totale du reseau</li>
+                <li>Volatilite: variation rapide des prix</li>
+                <li>Liquidite: facilite d'achat/vente</li>
+              </ul>
+            </div>
+            <div>
+              <h4>3 erreurs frequentes</h4>
+              <ul className="bullet-list">
+                <li>Suivre les promesses irreelles</li>
+                <li>Ignorer les risques techniques</li>
+                <li>Ne pas diversifier ses sources</li>
+              </ul>
+            </div>
+            <div>
+              <h4>Checklist securite</h4>
+              <ul className="bullet-list">
+                <li>Verifier les sources</li>
+                <li>Comprendre le projet avant d'agir</li>
+                <li>Rester prudent sur le long terme</li>
+              </ul>
+            </div>
+          </div>
         </section>
       </main>
 
